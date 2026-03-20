@@ -28,6 +28,21 @@ from .connection import Connection
 logger = logging.getLogger(__name__)
 
 
+def _safe_path_for_error(path: str) -> str:
+    if not path:
+        return path
+    try:
+        home = pathlib.Path.home().resolve()
+        resolved = pathlib.Path(path).resolve()
+    except Exception:
+        return path
+    try:
+        relative = resolved.relative_to(home)
+    except ValueError:
+        return str(resolved)
+    return str(pathlib.Path("~") / relative)
+
+
 class Browser:
     """
     The Browser object is the "root" of the hierarchy and contains a reference
@@ -425,10 +440,12 @@ class Browser:
         self._http = HTTPApi((self.config.host, self.config.port))
         util.get_registered_instances().add(self)
         await asyncio.sleep(0.25)
+        start_error = None
         for _ in range(5):
             try:
                 self.info = ContraDict(await self._http.get("version"), silent=True)
-            except (Exception,):
+            except (Exception,) as exc:
+                start_error = exc
                 if _ == 4:
                     logger.debug("could not start", exc_info=True)
                 await asyncio.sleep(0.5)
@@ -436,6 +453,15 @@ class Browser:
                 break
 
         if not self.info:
+            detail_lines = []
+            if start_error is not None:
+                detail_lines.append(f"last error: {start_error!r}")
+            if self._process is not None:
+                detail_lines.append(f"launcher return code: {self._process.returncode!r}")
+            if self.config.user_data_dir:
+                detail_lines.append(
+                    f"profile path: {_safe_path_for_error(self.config.user_data_dir)}"
+                )
             raise Exception(
                 (
                     """
@@ -444,7 +470,12 @@ class Browser:
                 ---------------------
                 One of the causes could be when you are running as root.
                 In that case you need to pass no_sandbox=True 
+                {details}
                 """
+                ).format(
+                    details="\n                " + "\n                ".join(detail_lines)
+                    if detail_lines
+                    else ""
                 )
             )
 

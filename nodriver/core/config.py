@@ -250,6 +250,16 @@ def is_root():
 
 def temp_profile_dir():
     """generate a temp dir (path)"""
+    if sys.platform.startswith("win"):
+        base_dir = pathlib.Path(tempfile.gettempdir())
+        for _ in range(10):
+            candidate = base_dir / f"uc_{secrets.token_hex(4)}"
+            try:
+                candidate.mkdir(parents=False, exist_ok=False)
+            except FileExistsError:
+                continue
+            return os.path.normpath(str(candidate))
+        raise FileExistsError("could not create a unique temporary profile directory")
     path = os.path.normpath(tempfile.mkdtemp(prefix="uc_"))
     return path
 
